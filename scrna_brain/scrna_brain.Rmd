@@ -1,0 +1,1509 @@
+---
+title: "scrna_analysis"
+author: "Aakash Deva Thirukonda Prakash"
+date: "2025-12-20"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+
+options(Seurat.object.assay.version = "v3")
+```
+
+
+```{r}
+#set working directory
+setwd("/Users/aakash/Downloads/scrna dataset/scRNAseq_analysis_vignette-master")
+ds1_counts <- Read10X(data.dir = "data/DS1")
+cat("DS1 dimensions:\n")
+cat("  Genes:", nrow(ds1_counts), "\n")
+cat("  Cells:", ncol(ds1_counts), "\n\n")
+
+ds1 <- CreateSeuratObject(
+  counts = ds1_counts,
+  project = "DS1",
+  min.cells = 3,      # Include genes detected in at least 3 cells
+  min.features = 200  # Include cells with at least 200 detected genes
+  )
+
+print(ds1)
+
+```
+
+
+```{r}
+ds2_counts <- Read10X(data.dir = "data/DS2")
+cat("DS2 dimensions:\n")
+cat("  Genes:", nrow(ds1_counts), "\n")
+cat("  Cells:", ncol(ds1_counts), "\n\n")
+
+ds2 <- CreateSeuratObject(
+  counts = ds2_counts,
+  project = "DS2",
+  min.cells = 3,      # Include genes detected in at least 3 cells
+  min.features = 200  # Include cells with at least 200 detected genes
+  )
+
+print(ds2)
+```
+
+```{r}
+# DS1 QC
+ds1[["percent.mt"]] <- PercentageFeatureSet(ds1, pattern = "^MT[-\\.]")
+VlnPlot(ds1, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+library(patchwork)
+plot1 <- FeatureScatter(ds1, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(ds1, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```
+```{r}
+# DS2 QC
+ds2[["percent.mt"]] <- PercentageFeatureSet(ds2, pattern = "^MT[-\\.]")
+VlnPlot(ds2, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+library(patchwork)
+plot1 <- FeatureScatter(ds2, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(ds2, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```
+```{r}
+
+ #the filtering stats is from the original paper
+
+ds1 <- subset(ds1, 
+              subset = nFeature_RNA > 200 & 
+                      nFeature_RNA < 6000 & 
+                      percent.mt < 5)
+
+# Filter DS2  
+ds2 <- subset(ds2, 
+              subset = nFeature_RNA > 200 & 
+                      nFeature_RNA < 6000 & 
+                      percent.mt < 5)
+
+# Check how many cells remain
+cat("DS1 cells after filtering:", ncol(ds1), "\n")
+cat("DS2 cells after filtering:", ncol(ds2), "\n")
+```
+
+
+```{r}
+
+#the tutorial followed 3000, but i followed 2000, i think its more standard to be honest
+
+# Normalize DS1
+ds1 <- NormalizeData(ds1)
+ds1 <- FindVariableFeatures(ds1, nfeatures = 2000)
+ds1 <- ScaleData(ds1)
+
+# Normalize DS2
+ds2 <- NormalizeData(ds2)
+ds2 <- FindVariableFeatures(ds2, nfeatures = 2000)
+ds2 <- ScaleData(ds2)
+
+cat("DS1 normalized and scaled\n")
+cat("DS2 normalized and scaled\n")
+```
+```{r}
+#plotting normalisation
+top_features_ds1 <- head(VariableFeatures(ds1), 20)
+plot1_ds1 <- VariableFeaturePlot(ds1)
+plot2_ds1 <- LabelPoints(plot = plot1_ds1, points = top_features_ds1, repel = TRUE)
+plot2_ds1  # Just show the labeled version
+```
+```{r}
+# DS2 normalisation
+top_features_ds2 <- head(VariableFeatures(ds2), 20)
+plot1_ds2 <- VariableFeaturePlot(ds2)
+plot2_ds2 <- LabelPoints(plot = plot1_ds2, points = top_features_ds2, repel = TRUE)
+plot2_ds2  
+```
+```{r}
+# Merge without integration just to see batch effects 
+
+# For the merged dataset, i used 3000 variable features instead of 2000  for the larger cell count and extra  sources of variation from combining two datasets
+
+merged <- merge(ds1, ds2) %>%
+    FindVariableFeatures(nfeatures = 3000) %>%
+    ScaleData() %>%
+    RunPCA(npcs = 50) %>%
+    RunUMAP(dims = 1:20)
+
+# Visualize batch effects
+plot1 <- DimPlot(merged, group.by="orig.ident")
+plot2 <- FeaturePlot(merged, c("FOXG1","EMX1","DLX2","LHX9"), ncol=2, pt.size = 0.1)
+plot1 + plot2 + plot_layout(widths = c(1.5, 2))
+
+# the cells are separated , so we will do batch correction now
+```
+```{r}
+# Merge DS1 and DS2
+merged <- merge(ds1, ds2) %>%
+    FindVariableFeatures(nfeatures = 3000) %>%
+    ScaleData() %>%
+    RunPCA(npcs = 50)
+
+# ihave used harmony this time, but there are a different batch correction techniques, it depends on the research question 
+
+# Run Harmony for batch correction
+library(harmony)
+integrated <- RunHarmony(merged, group.by.vars = "orig.ident", dims.use = 1:20, max.iter.harmony = 50)
+
+# Run UMAP on harmony-corrected embeddings
+integrated <- RunUMAP(integrated, reduction = "harmony", dims = 1:20)
+
+# Clustering
+integrated <- FindNeighbors(integrated, reduction = "harmony", dims = 1:20) %>% 
+              FindClusters(resolution = 0.6)
+
+# Save the integrated object
+saveRDS(integrated, file = "integrated_harmony.rds")
+
+
+print(integrated)
+```
+
+```{r}
+# Check if batch effects are corrected
+DimPlot(integrated, group.by = "orig.ident")
+
+# Check clusters
+DimPlot(integrated, label = TRUE)
+```
+```{r}
+plot1 <- UMAPPlot(integrated, group.by = "orig.ident")
+plot2 <- UMAPPlot(integrated, label = TRUE)
+plot3 <- FeaturePlot(integrated, c("FOXG1", "EMX1", "DLX2", "LHX9"), ncol = 2, pt.size = 0.1)
+
+((plot1 / plot2) | plot3) + plot_layout(widths = c(1, 2))
+
+
+```
+
+```{r}
+# Elbow plot for PCA
+ElbowPlot(integrated, ndims = 20)
+```
+```{r}
+# First 9 PCs - bigger view
+DimHeatmap(integrated, dims = 1:9, cells = 500, balanced = TRUE, ncol = 3)
+
+# Next 9 PCs
+DimHeatmap(integrated, dims = 10:18, cells = 500, balanced = TRUE, ncol = 3)
+```
+```{r}
+# First run tSNE
+integrated <- RunTSNE(integrated, reduction = "harmony", dims = 1:20)
+
+# Then plot both
+
+# im using this here markers based on the tutorials,but ideally to check  check whether certain cell types or cell states exist in the data, do a literature review or we can use other marker based annotation database like panglaoDB. It is possible for a Reference based cluster too! 
+plot1 <- FeaturePlot(integrated, 
+                     features = c("MKI67", "NES", "DCX", "FOXG1", "DLX2", "EMX1", "OTX2", "LHX9", "TFAP2A"),
+                     ncol = 3, pt.size=2,
+                     reduction = "tsne")
+
+plot2 <- FeaturePlot(integrated, 
+                     features = c("MKI67", "NES", "DCX", "FOXG1", "DLX2", "EMX1", "OTX2", "LHX9", "TFAP2A"),
+                     ncol = 3, pt.size = 2,
+                     reduction = "umap")
+
+plot1 
+
+plot2
+```
+
+```{r}
+integrated <- RunTSNE(integrated, reduction = "harmony", dims = 1:20)
+plot3 <- TSNEPlot(integrated, label = TRUE)
+plot3
+```
+You can use umap or tsne-depending on the research queston. i used both just out of curiosity. 
+```{r}
+integrated <- FindNeighbors(integrated, reduction = "harmony", dims = 1:20)
+integrated <- FindClusters(integrated, resolution = 1)
+
+plot1 <- DimPlot(integrated, reduction = "tsne", label = TRUE)
+plot2 <- DimPlot(integrated, reduction = "umap", label = TRUE)
+
+plot1
+plot2
+```
+
+```{r}
+ct_markers <- c("MKI67","NES","DCX","FOXG1", # G2M, NPC, neuron, telencephalon
+                "DLX2","DLX5","ISL1","SIX3","NKX2-1","SOX6","NR2F2", # ventral telencephalon related
+                "EMX1","PAX6","GLI3","EOMES","NEUROD6", # dorsal telencephalon related
+                "RSPO3","OTX2","LHX9","TFAP2A","RELN","HOXB2","HOXB5") # non-telencephalon related
+
+DefaultAssay(integrated) <- "RNA"
+integrated <- ScaleData(integrated, features = ct_markers)
+DoHeatmap(integrated, features = ct_markers) + NoLegend()
+```
+```{r}
+
+#stats test wilcox test 
+cl_markers <- FindAllMarkers(integrated, only.pos = TRUE, min.pct = 0.25, logfc.threshold = log(1.2))
+
+library(dplyr)
+cl_markers %>% 
+    group_by(cluster) %>% 
+    top_n(n = 2, wt = avg_log2FC)  
+```
+
+```{r}
+# Make sure you have top10_cl_markers
+top10_cl_markers <- cl_markers %>% 
+    group_by(cluster) %>% 
+    top_n(n = 10, wt = avg_log2FC)
+
+# Scale them
+DefaultAssay(integrated) <- "RNA"
+integrated <- ScaleData(integrated, features = unique(top10_cl_markers$gene))
+
+# Create heatmap (will be MUCH bigger)
+DoHeatmap(integrated, features = top10_cl_markers$gene) + NoLegend()
+```
+
+```{r}
+
+#heatmap just out of curiousity, notjing imp here
+# Extract the unique genes
+top_genes <- unique(top10_cl_markers$gene)
+
+# Scale ALL of them
+DefaultAssay(integrated) <- "RNA"
+integrated <- ScaleData(integrated, features = top_genes)
+
+# Now plot - should show all 161 genes
+DoHeatmap(integrated, features = top_genes) + NoLegend()
+```
+```{r}
+# fot fot plot, another visualisation tool, just out of curiousity, nothing imp here
+library(ggplot2)
+
+DotPlot(integrated, features = top_genes) + 
+    RotatedAxis() + 
+    theme(axis.text.x = element_text(size = 8))
+```
+
+```{r}
+
+
+#just plotting a randome gene 
+plot1 <- FeaturePlot(integrated, c("EMX2"), ncol = 1)
+plot2 <- VlnPlot(integrated, features = c("EMX2"), pt.size = 0)
+plot1 
+plot2
+```
+```{r}
+# installig voxhunt- just trying out 
+
+#voxhunt is a correlates expression profiles of cells or cell clusters to the in situ hybridization atlas of developing mouse brain in Allen Brain Atlas. For this is something i wanted to try, but im commenting this because it dint work for me and it needed more time 
+# install.packages('devtools')
+#this didnt work so im commenting out
+#devtools::install_github('immunogenomics/presto')
+
+#devtools::install_github('GfellerLab/EPIC')
+
+#devtools::install_github('quadbiolab/voxhunt')
+```
+```{r}
+# View top 2 markers per cluster, doing this because for annonation 
+cl_markers %>% 
+    group_by(cluster) %>% 
+    top_n(n = 2, wt = avg_log2FC) %>%
+    select(cluster, gene, avg_log2FC, pct.1, pct.2)
+```
+```{r}
+# Check for  progenitor vs neuron vs cycling
+FeaturePlot(integrated, 
+            features = c("SOX2", "EOMES", "NEUROD2", "MKI67"),
+            ncol = 2)
+
+# Check  for dorsal vs ventral
+FeaturePlot(integrated, 
+            features = c("EMX1", "DLX2", "PAX6", "NKX2-1"),
+            ncol = 2)
+
+# Check  for contamination
+FeaturePlot(integrated, 
+            features = c("GATA3", "AIF1", "VIT", "PTPRC"),
+            ncol = 2)
+```
+```{r}
+# Show clusters to identify which is which
+DimPlot(integrated, reduction = "umap", label = TRUE)
+```
+```{r}
+# Remove contamination clusters, they are likely from blood cells, microligia,  mesenchymal
+integrated_clean <- subset(integrated, idents = c(0:13))
+
+# Check remaining cells
+table(Idents(integrated_clean))
+
+# Re-visualize
+DimPlot(integrated_clean, reduction = "umap", label = TRUE)
+```
+```{r}
+
+Idents(integrated_clean) <- "seurat_clusters"
+
+# I took these markers from the tutorial, you need to do a basic lit review if you plan to do it on your own or other datasets.
+new_ident <- c(
+  "0"  = "Mature dorsal excitatory neurons",
+  "1"  = "Cycling progenitors",
+  "2"  = "Ventral interneurons",
+  "3"  = "Ventral progenitors",
+  "4"  = "GABAergic interneurons",
+  "5"  = "Hippocampal/cortical hem cells",
+  "6"  = "G2/M cycling cells",
+  "7"  = "Intermediate progenitors",
+  "8"  = "SST+ interneurons",
+  "9"  = "Mixed/transitional cells",
+  "10" = "Dorsal progenitors (cycling?)",
+  "11" = "S-phase cycling cells",
+  "12" = "Choroid plexus/roof plate",
+  "13" = "G1/S cycling progenitors",
+  "14" = "Unknown 1",
+  "15" = "Unknown 2"
+)
+
+# Keep only mappings that actually exist in the object 
+present <- intersect(names(new_ident), levels(integrated_clean))
+integrated_clean <- RenameIdents(integrated_clean, new_ident[present])
+
+# Plot
+DimPlot(integrated_clean, reduction = "umap", label = TRUE) + NoLegend()
+
+```
+```{r}
+# First, set identity back to cluster numbers 
+#How did we know clusters 0, 7, 10 are developmental?Ans
+#from the earlier UMAP + marker analysis!
+Idents(integrated_clean) <- "seurat_clusters"
+
+# Subset to dorsal clusters (0, 7, 10)
+# 0 = dorsal neurons, 7 = intermediate progenitors, 10 = dorsal progenitors
+integrated_dorsal <- subset(integrated_clean, idents = c(0, 7, 10))
+
+# Check how many cells
+table(Idents(integrated_dorsal))
+```
+
+```{r}
+# Find variable features for this subset
+
+#subestting for pseudotime
+integrated_dorsal <- FindVariableFeatures(integrated_dorsal, nfeatures = 2000)
+
+```
+```{r}
+# Step 3: Remove cell cycle genes
+#Note that cc genes is a built in seurat package or feauture, you can call it whatever, 
+VariableFeatures(integrated_dorsal) <- setdiff(VariableFeatures(integrated_dorsal), 
+                                                unlist(cc.genes))
+#so far we -removed cell cycle genes from VariableFeatures list, so this affects PCA, but we didnt remove cell cycle effects from gene expression values 
+
+# Step 4: Run PCA and UMAP
+integrated_dorsal <- RunPCA(integrated_dorsal, npcs = 50)
+integrated_dorsal <- RunUMAP(integrated_dorsal, dims = 1:20)
+
+# Visualize
+DimPlot(integrated_dorsal, reduction = "umap", label = TRUE)
+
+ #Even though cell cycle genes aren't driving the PCA anymore
+#Other genes are still affected by cell cycle, so you can still see the mix in clustering 
+```
+You can see the clusters are mixed and overlapping here 
+
+```{r}
+# Check developmental markers along the trajectory
+FeaturePlot(integrated_dorsal, 
+            features = c("MKI67", "GLI3", "EOMES", "NEUROD6"), 
+            ncol = 4)
+
+#in the image below, you can see Clear developmental trajectory Markers change in expected order: MKI67/GLI3 → EOMES → NEUROD6
+```
+```{r}
+#trouble with installation, can ignore, this is me just fixing it 
+
+#install.packages("/Users/aakash/Downloads/scrna dataset/smoother_1.3.tar.gz", repos = NULL, type = "source")
+
+#if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+
+
+#BiocManager::install("destiny")
+
+#library(destiny)
+
+```
+
+```{r}
+# Create diffusion map from PCA
+dm <- DiffusionMap(Embeddings(integrated_dorsal, "pca")[, 1:20])
+
+# Calculate diffusion pseudotime
+dpt <- DPT(dm)
+
+# Add pseudotime to Seurat object
+integrated_dorsal$dpt <- rank(dpt$dpt)
+
+# Visualize pseudotime with markers
+FeaturePlot(integrated_dorsal, 
+            features = c("dpt", "GLI3", "EOMES", "NEUROD6"), 
+            ncol = 4)
+
+#computational measurement of a cell's progression along a developmental trajectory. The dark blue cells are likely "older" or further along in a differentiation process compared to the light grey/purple cells.
+
+#GLI3: Shows very sparse expression associated with early progenitor cells and pattern formation.
+
+#EOMES : the bottom of the cluster shows they are in are in a specific transitional state
+#NEUROD6 entire right side of the UMAP. NEUROD6 is a marker for mature excitatory neurons.
+
+```
+```{r}
+# 1. Extract expression data (handling Seurat V5 vs V4)
+if (is(integrated_dorsal[['RNA']], 'Assay5')){
+    expr <- LayerData(integrated_dorsal, assay = "RNA", layer = "data")
+} else {
+    expr <- integrated_dorsal[['RNA']]@data
+}
+
+library(ggplot2)
+library(patchwork) # For combining plots with +
+
+# 2. Generate the individual scatter plots with LOESS smoothing
+# We use integrated_dorsal$dpt (which you defined as the rank) for the x-axis
+
+plot1 <- qplot(integrated_dorsal$dpt, as.numeric(expr["GLI3",]),
+               xlab="Pseudotime (Rank)", ylab="Expression", main="GLI3") +
+         geom_smooth(se = FALSE, method = "loess", color = "blue") + 
+         theme_bw()
+
+plot2 <- qplot(integrated_dorsal$dpt, as.numeric(expr["EOMES",]),
+               xlab="Pseudotime (Rank)", ylab="Expression", main="EOMES") +
+         geom_smooth(se = FALSE, method = "loess", color = "blue") + 
+         theme_bw()
+
+plot3 <- qplot(integrated_dorsal$dpt, as.numeric(expr["NEUROD6",]),
+               xlab="Pseudotime (Rank)", ylab="Expression", main="NEUROD6") +
+         geom_smooth(se = FALSE, method = "loess", color = "blue") + 
+         theme_bw()
+
+# 3. Display the plots side-by-side
+plot1 + plot2 + plot3
+
+#The blue line in each graph is a LOESS smooth, helps us see the general trend through all the noisy individual cell data points (the black dots).
+#GLI3 (Early/Progenitor): Expression starts at its highest point and immediately begins to drop as pseudotime increases. This confirms that GLI3 is a marker for the "starting" state
+#EOMES (Intermediate/Transition): This gene shows a classic "pulse" or wave. It starts low, peaks right in the middle of the trajectory (around rank 750), and then drops back down. This identifies these cells as Intermediate Progenitors
+
+#NEUROD6 (Mature/Late): Expression climbs rapidly and stays high for the remainder of the trajectory. This confirms that the end-state of  differentiation path is mature excitatory neurons.
+
+#You'll notice a thick band of black dots at 0 on the Y-axis for all genes.
+
+#This is called "dropout" or "sparsity" in single-cell RNA-seq.
+
+#It doesn't mean the gene isn't there; it just means the technology didn't capture enough mRNA for that specific gene in those specific cells.
+
+
+```
+```{r}
+
+```
+```{r}
+
+#before annotation with reference data, i want to check what i have.
+# See current cluster identities
+table(Idents(integrated_clean))
+
+# Or see original cluster numbers with annotations
+integrated_clean@meta.data %>%
+    select(seurat_clusters) %>%
+    table()
+```
+```{r}
+# Pseudotime analysis showed how cells progress from progenitors to neurons.
+# To validate our manual cluster annotations, we perform transcriptome  similarity analysis: calculating the correlation between average gene  expression in each of our clusters versus annotated cell types in a  reference dataset. High correlation confirms correct annotation.
+```
+
+```{r}
+#  Load reference
+seurat_ref <- readRDS("/Users/aakash/Downloads/scrna dataset/scRNAseq_analysis_vignette-master/data/DS1/ref_seurat_obj.rds")
+
+#  Explore reference
+cat("Reference dimensions:", dim(seurat_ref), "\n")
+cat("\nReference cell types:\n")
+print(table(seurat_ref$celltype))
+
+#  Calculate average expression in REFERENCE
+avg_expr_ref <- sapply(sort(unique(seurat_ref$celltype)), function(ct) {
+    cells_in_type <- which(seurat_ref$celltype == ct)
+    rowMeans(seurat_ref@assays$RNA@data[, cells_in_type])
+})
+
+#  Calculate average expression in YOUR DATA
+Idents(integrated_clean) <- "seurat_clusters"
+avg_expr_yours <- sapply(levels(integrated_clean@active.ident), function(cl) {
+    cells_in_cluster <- which(integrated_clean@active.ident == cl)
+    rowMeans(integrated_clean@assays$RNA@data[, cells_in_cluster])
+})
+
+#  Find common genes
+genes2cor <- intersect(rownames(avg_expr_ref), rownames(avg_expr_yours))
+cat("\nCommon genes:", length(genes2cor), "\n")
+
+#  Calculate correlation
+corr2ref_cl <- cor(avg_expr_yours[genes2cor, ], 
+                   avg_expr_ref[genes2cor, ], 
+                   method = "spearman")
+
+#  Visualize
+# Visualize with dendrograms
+library(pheatmap)
+pheatmap(corr2ref_cl, 
+         cluster_rows = TRUE,      # Enable row clustering (YOUR clusters)
+         cluster_cols = TRUE,      # Enable column clustering (REFERENCE types)
+         clustering_method = "complete",  # Linkage method
+         display_numbers = TRUE,
+         number_format = "%.2f",
+         fontsize = 8,
+         fontsize_number = 6,
+         main = "Your Clusters vs Reference (with dendrograms)",
+         color = colorRampPalette(c("blue", "white", "red"))(100))
+
+#  Best matches
+best_matches <- apply(corr2ref_cl, 1, function(row) {
+    colnames(corr2ref_cl)[which.max(row)]
+})
+
+print(data.frame(
+    Cluster = names(best_matches),
+    Best_Match = best_matches,
+    Correlation = round(apply(corr2ref_cl, 1, max), 3)
+))
+```
+```{r}
+# Manual cluster annotations are consistent with an established reference dataset. 
+```
+ 
+```{r}
+# We used integrated data (DS1 + DS2 combined) to compare against a  DS1-derived reference. This is valid because: (1) integration  removes technical batch effects, (2) we're  correlating relative gene expression patterns (not absolute values). This is  comparable across datasets
+```
+```{r}
+# Install qlcMatrix
+install.packages("qlcMatrix")
+
+# Then run the library call
+library(qlcMatrix)
+```
+
+
+```{r}
+
+# Transcriptome Similarity on CELL LEVEL
+
+# Instead of comparing cluster averages, we now correlate each individual  cell to reference cell types, then assign each cell to its best-matching  reference type. This provides finer resolution than cluster-level analysis.
+
+#  Rank gene expression in REFERENCE (per cell type)
+ranked_expr_ref <- apply(avg_expr_ref[genes2cor, ], 2, rank)
+
+#  Rank gene expression in YOUR DATA (per cell)
+library(presto)
+ranked_expr_yours <- rank_matrix(integrated_clean@assays$RNA@data[genes2cor, ])$X_ranked
+
+#  Calculate correlation for each cell to each reference type
+library(qlcMatrix)
+corr2ref_cell <- corSparse(ranked_expr_yours, ranked_expr_ref)
+
+#  Assign each cell to best-matching reference cell type
+ct_maxcor <- colnames(avg_expr_ref)[apply(corr2ref_cell, 1, which.max)]
+integrated_clean$celltype_maxcor <- ct_maxcor
+
+#  Visualize - compare cluster assignments vs cell-level assignments
+plot1 <- DimPlot(integrated_clean, label = TRUE) + 
+         ggtitle("Original Clusters")
+plot2 <- DimPlot(integrated_clean, group.by = "celltype_maxcor", label = TRUE) + 
+         ggtitle("Cell-Level Best Match to Reference")
+
+library(patchwork)
+plot1 | plot2
+
+#  Summarize cell-level correlations back to cluster level
+# Scale correlations and average per cluster
+corr2ref_scaled <- scale(t(corr2ref_cell))
+corr2ref_sum2cl <- t(sapply(levels(integrated_clean@active.ident), function(cl) {
+    cells_in_cl <- which(integrated_clean@active.ident == cl)
+    rowMeans(corr2ref_scaled[, cells_in_cl])
+}))
+
+#  Heatmap of scaled cell-level correlations summarized to clusters
+pheatmap(corr2ref_sum2cl,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         clustering_method = "complete",
+         display_numbers = TRUE,
+         number_format = "%.2f",
+         fontsize = 7,
+         fontsize_number = 5,
+         main = "Cell-Level Similarity with Dendrograms")
+```
+The UMAP shows  clustering has  successfully identified both discrete cell states and transitional populations along the developmental trajectory.
+
+heatmap reveals cluster heterogeneity by showing enrichment (red) or depletion (blue) of reference cell type signatures within each cluster. while cluster-level correlations were high (0.94-0.98), individual cells within clusters exist along a continuity  of  states rather than representing purely discrete cell types.
+```{r}
+
+# Seurat-Based Label Transfer
+
+# Update the reference object to Seurat v5 format
+seurat_ref <- UpdateSeuratObject(seurat_ref)
+
+# Then run the anchor finding
+anchors <- FindTransferAnchors(
+    reference = seurat_ref, 
+    query = integrated_clean, 
+    dims = 1:30, 
+    npcs = 30
+)
+
+# Continue with rest of code...
+predictions <- TransferData(
+    anchorset = anchors, 
+    refdata = seurat_ref$celltype, 
+    dims = 1:30
+)
+
+integrated_clean$celltype_transfer <- predictions$predicted.id
+
+plot1 <- DimPlot(integrated_clean, label = TRUE) + ggtitle("Original Clusters")
+plot2 <- DimPlot(integrated_clean, group.by = "celltype_transfer", label = TRUE, repel = TRUE) + 
+         ggtitle("Transferred Labels")
+
+library(patchwork)
+plot1 | plot2
+
+# Find transfer anchors
+anchors <- FindTransferAnchors(
+    reference = seurat_ref, 
+    query = integrated_clean, 
+    dims = 1:30, 
+    npcs = 30
+)
+
+#  Transfer labels
+predictions <- TransferData(
+    anchorset = anchors, 
+    refdata = seurat_ref$celltype, 
+    dims = 1:30
+)
+# Add to Seurat object
+integrated_clean$celltype_transfer <- predictions$predicted.id
+
+#  Visualize side-by-side
+plot1 <- DimPlot(integrated_clean, label = TRUE) + 
+         ggtitle("Original Clusters")
+plot2 <- DimPlot(integrated_clean, group.by = "celltype_transfer", label = TRUE, repel = TRUE) + 
+         ggtitle("Transferred Labels")
+
+library(patchwork)
+plot1 | plot2
+
+#  Summarize prediction scores by cluster
+Idents(integrated_clean) <- "seurat_clusters"
+pred_scores_sum2cl <- t(sapply(levels(integrated_clean@active.ident), function(cl) {
+    cells_in_cluster <- which(integrated_clean@active.ident == cl)
+    colMeans(predictions[cells_in_cluster, -c(1, ncol(predictions))])
+}))
+
+#  Heatmap with pheatmap (better for RStudio)
+library(pheatmap)
+pheatmap(pred_scores_sum2cl,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         display_numbers = TRUE,
+         number_format = "%.2f",
+         fontsize = 7,
+         main = "Seurat Label Transfer: Prediction Scores by Cluster")
+
+
+
+# Cross-tabulation
+table(Cluster = Idents(integrated_clean), 
+      Transferred = integrated_clean$celltype_transfer)
+```
+```{r}
+#The three most homogeneous clusters  showed >70% assignment to single reference cell types,in seurat based clustering
+
+#Several clusters  showed mixed prediction scores across multiple reference types, this shows  biological heterogeneity within these populations. this happens because of cells captured during active differentiation or representing transitional states along developmental trajectories
+```
+
+```{r}
+#all methods consistently identified the same major cell populations: cortical excitatory neurons , cortical intermediate progenitors , cortical NPCs  and inhibitory neurons.proving manual annotation was correct all along.
+```
+
+```{r}
+# 
+integrated_clean$maturation <- "Other"
+integrated_clean$maturation[integrated_clean$seurat_clusters %in% c(9, 10, 11)] <- "Progenitor"
+integrated_clean$maturation[integrated_clean$seurat_clusters == 7] <- "IP"
+integrated_clean$maturation[integrated_clean$seurat_clusters == 0] <- "Neuron"
+
+DimPlot(integrated_clean, group.by = "maturation")
+```
+
+```{r}
+# So far we have identified various cell populations in  organoids, we still dont know underlying molecular mechanisms differentiating these cell types. Thats why we perform differential gene expression of Progenitors vs Mature Neurons,  Dorsal vs Ventral Lineages and Three-Way Maturation Trajectory to idenitfy which genes are expressed.We know which genes are expressed but there are so many genes behind a funtion, thats why we do Gene set enrichment analysis (GSEA).in GSEA  it is possible for interpret functions from a list of genes. 
+```
+
+```{r}
+#Progenitors vs Mature Neurons 
+
+#we identify genes that drive the  transition from proliferative stem cells to post-mitotic, more mature neurons. This is the most dramatic developmental transition  and gives idea about  the regulatory networks governing neurogenesis
+
+
+
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(pheatmap)
+
+# Set identity to clusters
+Idents(integrated_clean) <- "seurat_clusters"
+
+# Find differentially expressed genes
+deg_prog_vs_neuron <- FindMarkers(
+    integrated_clean,
+    ident.1 = "10",              # Progenitors (dorsal)
+    ident.2 = "0",               # Mature neurons
+    test.use = "wilcox",         # Wilcoxon rank-sum test
+    logfc.threshold = 0.25,      # Minimum log2 fold change
+    min.pct = 0.1,               # Minimum % cells expressing
+    only.pos = FALSE             # Get both up and down regulated
+)
+
+# Add gene names as column
+deg_prog_vs_neuron$gene <- rownames(deg_prog_vs_neuron)
+
+# View top results
+head(deg_prog_vs_neuron, 20)
+
+# Summary statistics
+cat("PROGENITORS vs NEURONS ")
+cat("Total DEGs (p_adj < 0.05):", 
+    nrow(deg_prog_vs_neuron[deg_prog_vs_neuron$p_val_adj < 0.05, ]), "\n")
+cat("Upregulated in Progenitors (cluster 10):", 
+    nrow(deg_prog_vs_neuron[deg_prog_vs_neuron$p_val_adj < 0.05 & deg_prog_vs_neuron$avg_log2FC > 0, ]), "\n")
+cat("Upregulated in Neurons (cluster 0):", 
+    nrow(deg_prog_vs_neuron[deg_prog_vs_neuron$p_val_adj < 0.05 & deg_prog_vs_neuron$avg_log2FC < 0, ]), "\n\n")
+
+# Get top 10 genes for each direction
+top_prog_genes <- deg_prog_vs_neuron %>%
+    filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
+    arrange(desc(avg_log2FC)) %>%
+    head(10)
+
+top_neuron_genes <- deg_prog_vs_neuron %>%
+    filter(p_val_adj < 0.05, avg_log2FC < 0) %>%
+    arrange(avg_log2FC) %>%
+    head(10)
+
+cat("Top Progenitor genes:\n")
+print(top_prog_genes[, c("gene", "avg_log2FC", "p_val_adj")])
+
+cat("\nTop Neuron genes:\n")
+print(top_neuron_genes[, c("gene", "avg_log2FC", "p_val_adj")])
+
+# Prepare data for volcano plot
+deg_prog_vs_neuron$significant <- "Not Significant"
+deg_prog_vs_neuron$significant[deg_prog_vs_neuron$p_val_adj < 0.05 & deg_prog_vs_neuron$avg_log2FC > 0.5] <- "Progenitor"
+deg_prog_vs_neuron$significant[deg_prog_vs_neuron$p_val_adj < 0.05 & deg_prog_vs_neuron$avg_log2FC < -0.5] <- "Neuron"
+
+# Volcano plot
+volcano1 <- ggplot(deg_prog_vs_neuron, aes(x = avg_log2FC, y = -log10(p_val_adj), color = significant)) +
+    geom_point(alpha = 0.6, size = 1.5) +
+    scale_color_manual(values = c("Progenitor" = "#E41A1C", "Neuron" = "#377EB8", "Not Significant" = "grey70")) +
+    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", color = "black", alpha = 0.5) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black", alpha = 0.5) +
+    labs(
+        title = "Differential Gene Expression: Progenitors vs Neurons",
+        subtitle = "Cluster 10 vs Cluster 0",
+        x = "Log2 Fold Change",
+        y = "-Log10 Adjusted P-value",
+        color = "Enriched in"
+    ) +
+    theme_bw() +
+    theme(
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.subtitle = element_text(hjust = 0.5),
+        legend.position = "right"
+    )
+
+# Add labels for top genes
+top_label_genes <- deg_prog_vs_neuron %>%
+    filter(p_val_adj < 0.05, abs(avg_log2FC) > 1.5) %>%
+    arrange(desc(abs(avg_log2FC))) %>%
+    head(20)
+
+volcano1_labeled <- volcano1 + 
+    geom_text_repel(
+        data = top_label_genes, 
+        aes(label = gene), 
+        size = 3, 
+        max.overlaps = 20,
+        box.padding = 0.5,
+        segment.color = "grey50"
+    )
+
+print(volcano1_labeled)
+
+# Heatmap of top DEGs
+top_genes_combined <- c(
+    rownames(top_prog_genes),
+    rownames(top_neuron_genes)
+)
+
+# Subset to these two clusters
+cells_subset <- WhichCells(integrated_clean, idents = c("0", "10"))
+expr_subset <- as.matrix(integrated_clean@assays$RNA@data[top_genes_combined, cells_subset])
+
+# Create annotation
+cluster_annot <- data.frame(
+    Cluster = integrated_clean$seurat_clusters[cells_subset]
+)
+rownames(cluster_annot) <- cells_subset
+
+pheatmap(expr_subset,
+         scale = "row",
+         cluster_cols = TRUE,
+         cluster_rows = FALSE,
+         annotation_col = cluster_annot,
+         show_colnames = FALSE,
+         fontsize_row = 8,
+         main = "Top DEGs: Progenitors vs Neurons")
+
+# Save results
+write.csv(deg_prog_vs_neuron, "deg_progenitors_vs_neurons.csv", row.names = TRUE)
+
+#Heatmap shows clean separation - distinct expression patterns Volcano plot shows significance - robust statistics
+
+```
+
+```{r}
+#Dorsal vs Ventral Lineages
+
+#fundamental axis of forebrain developmentUnlike a flat cell culture, an organoid is a 3D structure that attempts to mimic brain anatomy.
+
+#The Dorsal lineage (Cortex) produces excitatory neurons that think and plan, while the Ventral lineage  produces inhibitory neurons that regulate that activity.It is important to DGE to justify which part of the brain you are actually studying
+
+
+# Define regional groups
+integrated_clean$region <- "Other"
+integrated_clean$region[integrated_clean$seurat_clusters %in% c(0, 7, 10, 1, 11)] <- "Dorsal"
+integrated_clean$region[integrated_clean$seurat_clusters %in% c(2, 4, 8)] <- "Ventral"
+
+# Check group sizes
+cat("\n=== REGIONAL GROUPS ===\n")
+print(table(integrated_clean$region))
+
+# Visualize regions
+p_regions <- DimPlot(integrated_clean, group.by = "region", label = TRUE) +
+    ggtitle("Dorsal vs Ventral Regions")
+print(p_regions)
+
+# Set identity to region
+Idents(integrated_clean) <- "region"
+
+# Find DEGs
+deg_dorsal_vs_ventral <- FindMarkers(
+    integrated_clean,
+    ident.1 = "Dorsal",
+    ident.2 = "Ventral",
+    test.use = "wilcox",
+    logfc.threshold = 0.25,
+    min.pct = 0.1,
+    only.pos = FALSE
+)
+
+deg_dorsal_vs_ventral$gene <- rownames(deg_dorsal_vs_ventral)
+
+# Summary
+cat("\n=== DORSAL vs VENTRAL ===\n")
+cat("Total DEGs (p_adj < 0.05):", 
+    nrow(deg_dorsal_vs_ventral[deg_dorsal_vs_ventral$p_val_adj < 0.05, ]), "\n")
+cat("Dorsal markers:", 
+    nrow(deg_dorsal_vs_ventral[deg_dorsal_vs_ventral$p_val_adj < 0.05 & deg_dorsal_vs_ventral$avg_log2FC > 0, ]), "\n")
+cat("Ventral markers:", 
+    nrow(deg_dorsal_vs_ventral[deg_dorsal_vs_ventral$p_val_adj < 0.05 & deg_dorsal_vs_ventral$avg_log2FC < 0, ]), "\n\n")
+
+# Top genes
+top_dorsal <- deg_dorsal_vs_ventral %>%
+    filter(p_val_adj < 0.05, avg_log2FC > 0) %>%
+    arrange(desc(avg_log2FC)) %>%
+    head(10)
+
+top_ventral <- deg_dorsal_vs_ventral %>%
+    filter(p_val_adj < 0.05, avg_log2FC < 0) %>%
+    arrange(avg_log2FC) %>%
+    head(10)
+
+cat("Top Dorsal markers:\n")
+print(top_dorsal[, c("gene", "avg_log2FC", "p_val_adj")])
+
+cat("\nTop Ventral markers:\n")
+print(top_ventral[, c("gene", "avg_log2FC", "p_val_adj")])
+
+# Prepare for volcano plot
+deg_dorsal_vs_ventral$significant <- "Not Significant"
+deg_dorsal_vs_ventral$significant[deg_dorsal_vs_ventral$p_val_adj < 0.05 & deg_dorsal_vs_ventral$avg_log2FC > 0.5] <- "Dorsal"
+deg_dorsal_vs_ventral$significant[deg_dorsal_vs_ventral$p_val_adj < 0.05 & deg_dorsal_vs_ventral$avg_log2FC < -0.5] <- "Ventral"
+
+# Volcano plot
+volcano2 <- ggplot(deg_dorsal_vs_ventral, aes(x = avg_log2FC, y = -log10(p_val_adj), color = significant)) +
+    geom_point(alpha = 0.6, size = 1.5) +
+    scale_color_manual(values = c("Dorsal" = "#4DAF4A", "Ventral" = "#984EA3", "Not Significant" = "grey70")) +
+    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", color = "black", alpha = 0.5) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black", alpha = 0.5) +
+    labs(
+        title = "Differential Gene Expression: Dorsal vs Ventral",
+        x = "Log2 Fold Change",
+        y = "-Log10 Adjusted P-value",
+        color = "Enriched in"
+    ) +
+    theme_bw() +
+    theme(
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "right"
+    )
+
+# Add labels
+top_label_dv <- deg_dorsal_vs_ventral %>%
+    filter(p_val_adj < 0.05, abs(avg_log2FC) > 1) %>%
+    arrange(desc(abs(avg_log2FC))) %>%
+    head(20)
+
+volcano2_labeled <- volcano2 + 
+    geom_text_repel(
+        data = top_label_dv, 
+        aes(label = gene), 
+        size = 3, 
+        max.overlaps = 20,
+        box.padding = 0.5
+    )
+
+print(volcano2_labeled)
+
+# Save
+write.csv(deg_dorsal_vs_ventral, "deg_dorsal_vs_ventral.csv", row.names = TRUE)
+
+#You can see that there is  Spatial segregation on UMAP showing clean boundaries . this proves they are organizing into the correct spatial identities of the human forebrain.
+
+```
+
+```{r}
+#Three-Way Maturation Trajectory
+#Biology: A Radial Glia cell has a "choice" to make: Stay a stem cell (Self-renewal) or Become an Intermediate Progenitor (to make more neurons) or Become a Glial cell (Astrocytes/Oligodendrocytes). I t is possible to identify genes that are unique to the process of becoming a human neuron versus the process of becoming a human astrocyte. revealing stage-specific regulatory programs and validating our pseudotemporal ordering
+
+
+# Three-way comparison: Progenitors -> IPs -> Neurons to identify stage-specific and progressive gene expression changes
+
+# Define maturation stages
+integrated_clean$maturation <- "Other"
+integrated_clean$maturation[integrated_clean$seurat_clusters %in% c(9, 10, 11)] <- "Progenitor"
+integrated_clean$maturation[integrated_clean$seurat_clusters == 7] <- "IP"
+integrated_clean$maturation[integrated_clean$seurat_clusters == 0] <- "Neuron"
+
+# Check group sizes
+cat(" MATURATION STAGES ")
+print(table(integrated_clean$maturation))
+
+# Visualize
+p_maturation <- DimPlot(integrated_clean, group.by = "maturation", label = TRUE) +
+    ggtitle("Maturation Stages")
+print(p_maturation)
+
+# Set identity
+Idents(integrated_clean) <- "maturation"
+
+# Three pairwise comparisons
+
+# 1. Progenitor vs IP
+cat("\n=== Running Progenitor vs IP ===\n")
+deg_prog_vs_ip <- FindMarkers(
+    integrated_clean,
+    ident.1 = "Progenitor",
+    ident.2 = "IP",
+    test.use = "wilcox",
+    logfc.threshold = 0.25,
+    min.pct = 0.1
+)
+deg_prog_vs_ip$gene <- rownames(deg_prog_vs_ip)
+
+# 2. IP vs Neuron
+cat("=== Running IP vs Neuron ===\n")
+deg_ip_vs_neuron <- FindMarkers(
+    integrated_clean,
+    ident.1 = "IP",
+    ident.2 = "Neuron",
+    test.use = "wilcox",
+    logfc.threshold = 0.25,
+    min.pct = 0.1
+)
+deg_ip_vs_neuron$gene <- rownames(deg_ip_vs_neuron)
+
+# 3. Progenitor vs Neuron
+cat("=== Running Progenitor vs Neuron ===\n")
+deg_prog_vs_neuron_mat <- FindMarkers(
+    integrated_clean,
+    ident.1 = "Progenitor",
+    ident.2 = "Neuron",
+    test.use = "wilcox",
+    logfc.threshold = 0.25,
+    min.pct = 0.1
+)
+deg_prog_vs_neuron_mat$gene <- rownames(deg_prog_vs_neuron_mat)
+
+# Summary for each comparison
+cat("\n=== TRAJECTORY ANALYSIS SUMMARY ===\n")
+cat("Progenitor vs IP - Total DEGs:", 
+    nrow(deg_prog_vs_ip[deg_prog_vs_ip$p_val_adj < 0.05, ]), "\n")
+cat("IP vs Neuron - Total DEGs:", 
+    nrow(deg_ip_vs_neuron[deg_ip_vs_neuron$p_val_adj < 0.05, ]), "\n")
+cat("Progenitor vs Neuron - Total DEGs:", 
+    nrow(deg_prog_vs_neuron_mat[deg_prog_vs_neuron_mat$p_val_adj < 0.05, ]), "\n\n")
+
+# Find stage-specific genes
+prog_ip_genes <- rownames(deg_prog_vs_ip[deg_prog_vs_ip$p_val_adj < 0.05, ])
+ip_neuron_genes <- rownames(deg_ip_vs_neuron[deg_ip_vs_neuron$p_val_adj < 0.05, ])
+
+ip_specific <- setdiff(prog_ip_genes, ip_neuron_genes)
+progressive_genes <- intersect(prog_ip_genes, ip_neuron_genes)
+
+cat("IP-specific genes (change only Prog->IP):", length(ip_specific), "\n")
+cat("Progressive genes (change in both transitions):", length(progressive_genes), "\n\n")
+
+# Volcano plots for each comparison
+
+# Prog vs IP
+deg_prog_vs_ip$significant <- "Not Significant"
+deg_prog_vs_ip$significant[deg_prog_vs_ip$p_val_adj < 0.05 & deg_prog_vs_ip$avg_log2FC > 0.5] <- "Progenitor"
+deg_prog_vs_ip$significant[deg_prog_vs_ip$p_val_adj < 0.05 & deg_prog_vs_ip$avg_log2FC < -0.5] <- "IP"
+
+volcano3a <- ggplot(deg_prog_vs_ip, aes(x = avg_log2FC, y = -log10(p_val_adj), color = significant)) +
+    geom_point(alpha = 0.6, size = 1.5) +
+    scale_color_manual(values = c("Progenitor" = "#FF7F00", "IP" = "#E41A1C", "Not Significant" = "grey70")) +
+    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", alpha = 0.5) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", alpha = 0.5) +
+    labs(title = "Progenitor vs IP", x = "Log2FC", y = "-Log10(padj)") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# IP vs Neuron
+deg_ip_vs_neuron$significant <- "Not Significant"
+deg_ip_vs_neuron$significant[deg_ip_vs_neuron$p_val_adj < 0.05 & deg_ip_vs_neuron$avg_log2FC > 0.5] <- "IP"
+deg_ip_vs_neuron$significant[deg_ip_vs_neuron$p_val_adj < 0.05 & deg_ip_vs_neuron$avg_log2FC < -0.5] <- "Neuron"
+
+volcano3b <- ggplot(deg_ip_vs_neuron, aes(x = avg_log2FC, y = -log10(p_val_adj), color = significant)) +
+    geom_point(alpha = 0.6, size = 1.5) +
+    scale_color_manual(values = c("IP" = "#E41A1C", "Neuron" = "#377EB8", "Not Significant" = "grey70")) +
+    geom_vline(xintercept = c(-0.5, 0.5), linetype = "dashed", alpha = 0.5) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", alpha = 0.5) +
+    labs(title = "IP vs Neuron", x = "Log2FC", y = "-Log10(padj)") +
+    theme_bw() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# Show both together
+library(patchwork)
+volcano3a | volcano3b
+
+# Heatmap showing expression across all three stages
+top_genes_trajectory <- c(
+    rownames(deg_prog_vs_ip %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC))) %>% head(5)),
+    rownames(deg_ip_vs_neuron %>% filter(p_val_adj < 0.05) %>% arrange(desc(abs(avg_log2FC))) %>% head(5))
+)
+
+cells_trajectory <- WhichCells(integrated_clean, idents = c("Progenitor", "IP", "Neuron"))
+expr_trajectory <- as.matrix(integrated_clean@assays$RNA@data[unique(top_genes_trajectory), cells_trajectory])
+
+stage_annot <- data.frame(
+    Stage = integrated_clean$maturation[cells_trajectory]
+)
+rownames(stage_annot) <- cells_trajectory
+
+pheatmap(expr_trajectory,
+         scale = "row",
+         cluster_cols = TRUE,
+         cluster_rows = FALSE,
+         annotation_col = stage_annot,
+         show_colnames = FALSE,
+         fontsize_row = 8,
+         main = "Gene Expression Across Maturation Stages")
+
+# Save all results
+write.csv(deg_prog_vs_ip, "deg_progenitor_vs_ip.csv", row.names = TRUE)
+write.csv(deg_ip_vs_neuron, "deg_ip_vs_neuron.csv", row.names = TRUE)
+write.csv(deg_prog_vs_neuron_mat, "deg_progenitor_vs_neuron_trajectory.csv", row.names = TRUE)
+
+
+```
+```{r}
+#now moving on GSEA 
+
+
+# Perform GO enrichment on differentially expressed genes to identify
+# biological pathways and processes enriched in each comparison
+
+# Install packages if needed
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install(c("clusterProfiler", "org.Hs.eg.db", "enrichplot"))
+
+# Load libraries
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(ggplot2)
+library(dplyr)
+
+
+# GSEA of Progenitors vs Neurons
+
+
+cat("GSEA: Progenitors vs Neurons")
+
+# Get significant DEGs
+sig_prog_neuron <- deg_prog_vs_neuron %>%
+    filter(p_val_adj < 0.05, abs(avg_log2FC) > 0.5)
+
+# Separate up and down regulated
+progenitor_genes <- sig_prog_neuron %>%
+    filter(avg_log2FC > 0) %>%
+    pull(gene)
+
+neuron_genes <- sig_prog_neuron %>%
+    filter(avg_log2FC < 0) %>%
+    pull(gene)
+
+cat("Progenitor genes for GSEA:", length(progenitor_genes), "\n")
+cat("Neuron genes for GSEA:", length(neuron_genes), "\n")
+
+# Convert gene symbols to Entrez IDs
+progenitor_entrez <- bitr(progenitor_genes, 
+                          fromType = "SYMBOL",
+                          toType = "ENTREZID",
+                          OrgDb = org.Hs.eg.db)
+
+neuron_entrez <- bitr(neuron_genes, 
+                      fromType = "SYMBOL",
+                      toType = "ENTREZID",
+                      OrgDb = org.Hs.eg.db)
+
+cat("Converted progenitor genes:", nrow(progenitor_entrez), "\n")
+cat("Converted neuron genes:", nrow(neuron_entrez), "\n")
+
+# GO Enrichment - Progenitor genes
+ego_progenitor <- enrichGO(gene = progenitor_entrez$ENTREZID,
+                           OrgDb = org.Hs.eg.db,
+                           ont = "BP",  # Biological Process
+                           pAdjustMethod = "BH",
+                           pvalueCutoff = 0.05,
+                           qvalueCutoff = 0.05,
+                           readable = TRUE)
+
+# GO Enrichment - Neuron genes
+ego_neuron <- enrichGO(gene = neuron_entrez$ENTREZID,
+                       OrgDb = org.Hs.eg.db,
+                       ont = "BP",
+                       pAdjustMethod = "BH",
+                       pvalueCutoff = 0.05,
+                       qvalueCutoff = 0.05,
+                       readable = TRUE)
+
+# View top results
+cat("\n=== Top Progenitor Pathways ===\n")
+print(head(ego_progenitor, 10))
+
+cat("\n=== Top Neuron Pathways ===\n")
+print(head(ego_neuron, 10))
+
+# Visualize - Progenitor pathways
+p1 <- dotplot(ego_progenitor, showCategory = 20, title = "Progenitor-Enriched Pathways") +
+    theme(axis.text.y = element_text(size = 8))
+
+p2 <- barplot(ego_progenitor, showCategory = 10, title = "Top Progenitor Pathways")
+
+print(p1)
+print(p2)
+
+# Visualize - Neuron pathways
+p3 <- dotplot(ego_neuron, showCategory = 20, title = "Neuron-Enriched Pathways") +
+    theme(axis.text.y = element_text(size = 8))
+
+p4 <- barplot(ego_neuron, showCategory = 10, title = "Top Neuron Pathways")
+
+print(p3)
+print(p4)
+
+# Save results
+write.csv(as.data.frame(ego_progenitor), "gsea_progenitor_pathways.csv", row.names = FALSE)
+write.csv(as.data.frame(ego_neuron), "gsea_neuron_pathways.csv", row.names = FALSE)
+
+
+# GSEA 2 of  Dorsal vs Ventral
+
+
+cat("\n=== GSEA: Dorsal vs Ventral ===\n")
+
+# Get significant DEGs
+sig_dorsal_ventral <- deg_dorsal_vs_ventral %>%
+    filter(p_val_adj < 0.05, abs(avg_log2FC) > 0.5)
+
+# Separate
+dorsal_genes <- sig_dorsal_ventral %>%
+    filter(avg_log2FC > 0) %>%
+    pull(gene)
+
+ventral_genes <- sig_dorsal_ventral %>%
+    filter(avg_log2FC < 0) %>%
+    pull(gene)
+
+cat("Dorsal genes for GSEA:", length(dorsal_genes), "\n")
+cat("Ventral genes for GSEA:", length(ventral_genes), "\n")
+
+# Convert to Entrez
+dorsal_entrez <- bitr(dorsal_genes, 
+                      fromType = "SYMBOL",
+                      toType = "ENTREZID",
+                      OrgDb = org.Hs.eg.db)
+
+ventral_entrez <- bitr(ventral_genes, 
+                       fromType = "SYMBOL",
+                       toType = "ENTREZID",
+                       OrgDb = org.Hs.eg.db)
+
+# GO Enrichment
+ego_dorsal <- enrichGO(gene = dorsal_entrez$ENTREZID,
+                       OrgDb = org.Hs.eg.db,
+                       ont = "BP",
+                       pAdjustMethod = "BH",
+                       pvalueCutoff = 0.05,
+                       qvalueCutoff = 0.05,
+                       readable = TRUE)
+
+ego_ventral <- enrichGO(gene = ventral_entrez$ENTREZID,
+                        OrgDb = org.Hs.eg.db,
+                        ont = "BP",
+                        pAdjustMethod = "BH",
+                        pvalueCutoff = 0.05,
+                        qvalueCutoff = 0.05,
+                        readable = TRUE)
+
+# View results
+cat("\n=== Top Dorsal Pathways ===\n")
+print(head(ego_dorsal, 10))
+
+cat("\n=== Top Ventral Pathways ===\n")
+print(head(ego_ventral, 10))
+
+# Visualize
+p5 <- dotplot(ego_dorsal, showCategory = 20, title = "Dorsal-Enriched Pathways") +
+    theme(axis.text.y = element_text(size = 8))
+
+p6 <- dotplot(ego_ventral, showCategory = 20, title = "Ventral-Enriched Pathways") +
+    theme(axis.text.y = element_text(size = 8))
+
+print(p5)
+print(p6)
+
+# Save
+write.csv(as.data.frame(ego_dorsal), "gsea_dorsal_pathways.csv", row.names = FALSE)
+write.csv(as.data.frame(ego_ventral), "gsea_ventral_pathways.csv", row.names = FALSE)
+
+
+# GSEA 3 pf  Maturation Trajectory
+
+
+cat("\n=== GSEA: IP-Specific Genes ===\n")
+
+# Get IP-specific genes (change in Prog->IP but not IP->Neuron)
+# These are genes unique to IP stage
+
+# Option 1: Analyze the 1,951 IP-specific genes we identified
+# For now, let's focus on genes enriched in IP vs both Prog and Neuron
+
+# Get genes high in IP from both comparisons
+ip_vs_prog <- deg_prog_vs_ip %>%
+    filter(p_val_adj < 0.05, avg_log2FC < -0.5) %>%  # High in IP (negative = IP enriched)
+    pull(gene)
+
+ip_vs_neuron <- deg_ip_vs_neuron %>%
+    filter(p_val_adj < 0.05, avg_log2FC > 0.5) %>%  # High in IP (positive = IP enriched)
+    pull(gene)
+
+# Intersection = IP-specific
+ip_specific_genes <- intersect(ip_vs_prog, ip_vs_neuron)
+
+cat("IP-specific genes (high in IP vs both Prog and Neuron):", length(ip_specific_genes), "\n")
+
+if(length(ip_specific_genes) > 10) {
+    # Convert to Entrez
+    ip_entrez <- bitr(ip_specific_genes, 
+                      fromType = "SYMBOL",
+                      toType = "ENTREZID",
+                      OrgDb = org.Hs.eg.db)
+    
+    # GO Enrichment
+    ego_ip <- enrichGO(gene = ip_entrez$ENTREZID,
+                       OrgDb = org.Hs.eg.db,
+                       ont = "BP",
+                       pAdjustMethod = "BH",
+                       pvalueCutoff = 0.05,
+                       qvalueCutoff = 0.05,
+                       readable = TRUE)
+    
+    cat("\n=== Top IP-Specific Pathways ===\n")
+    print(head(ego_ip, 10))
+    
+    # Visualize
+    p7 <- dotplot(ego_ip, showCategory = 20, title = "IP-Specific Pathways") +
+        theme(axis.text.y = element_text(size = 8))
+    
+    print(p7)
+    
+    # Save
+    write.csv(as.data.frame(ego_ip), "gsea_ip_specific_pathways.csv", row.names = FALSE)
+} else {
+    cat("Not enough IP-specific genes for enrichment\n")
+}
+
+
+# COMBINED VISUALIZATION
+
+
+# Compare pathways across conditions
+library(patchwork)
+
+# Create summary plot
+combined_plot <- (p1 | p3) / (p5 | p6)
+combined_plot + plot_annotation(
+    title = "GO Enrichment Across All Comparisons",
+    theme = theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"))
+)
+
+# Summary statistics
+cat("\n=== GSEA SUMMARY ===\n")
+cat("Progenitor pathways enriched:", nrow(ego_progenitor), "\n")
+cat("Neuron pathways enriched:", nrow(ego_neuron), "\n")
+cat("Dorsal pathways enriched:", nrow(ego_dorsal), "\n")
+cat("Ventral pathways enriched:", nrow(ego_ventral), "\n")
+if(exists("ego_ip")) {
+    cat("IP-specific pathways enriched:", nrow(ego_ip), "\n")
+}
+
+cat("\n=== ALL GSEA ANALYSES COMPLETE ===\n")
+cat("CSV files saved:\n")
+cat("- gsea_progenitor_pathways.csv\n")
+cat("- gsea_neuron_pathways.csv\n")
+cat("- gsea_dorsal_pathways.csv\n")
+cat("- gsea_ventral_pathways.csv\n")
+if(exists("ego_ip")) {
+    cat("- gsea_ip_specific_pathways.csv\n")
+}
+```
+
+
+```{r}
+#We will be doing rna velocity, for convenience, i will do it in python.  but before that i want to take a lok at what objects we have and what seurat objecrt do i have in particular 
+
+
+
+#  List ALL objects
+ls()
+
+#  List only Seurat objects
+seurat_objects <- ls()[sapply(ls(), function(x) {
+    inherits(get(x), "Seurat")
+})]
+
+cat("Seurat objects in environment:\n")
+print(seurat_objects)
+
+# Check size and details of each Seurat object
+for(obj_name in seurat_objects) {
+    obj <- get(obj_name)
+    cat("\n==========================================\n")
+    cat("Object:", obj_name, "\n")
+    cat("Number of cells:", ncol(obj), "\n")
+    cat("Number of genes:", nrow(obj), "\n")
+    cat("Clusters:", length(unique(Idents(obj))), "\n")
+    cat("Reductions:", names(obj@reductions), "\n")
+    cat("Metadata columns:", ncol(obj@meta.data), "\n")
+    cat("Sample metadata columns:", head(colnames(obj@meta.data), 10), "\n")
+}
+
+
+
+```
+```{r}
+# converting to h5ad, this works better in scanpy. 
+# Install anndata R package
+#install.packages("anndata")
+
+library(anndata)
+
+
+library(anndata)
+
+# Convert
+adata <- AnnData(
+    X = t(as.matrix(GetAssayData(integrated_clean, layer = "data"))),
+    obs = integrated_clean@meta.data,
+    var = data.frame(row.names = rownames(integrated_clean))
+)
+
+# Add embeddings
+adata$obsm <- list(
+    X_umap = Embeddings(integrated_clean, "umap"),
+    X_harmony = Embeddings(integrated_clean, "harmony"),
+    X_pca = Embeddings(integrated_clean, "pca")
+)
+
+# Write to file
+adata$write_h5ad("integrated_clean.h5ad")
+
+cat("✓ Saved: integrated_clean.h5ad\n")
+
+```
+```{r}
+# Verify file exists and size
+file.exists("integrated_clean.h5ad")
+
+# Check file size
+file.info("integrated_clean.h5ad")$size / 1024^2  # Size in MB
+
+# Get full path
+cat("File location:\n", file.path(getwd(), "integrated_clean.h5ad"), "\n")
+```
+
+```{r}
+library(anndata)
+
+# Does file exist?
+file.exists("integrated_clean.h5ad")
+
+# What's in it?
+library(anndata)
+adata <- read_h5ad("integrated_clean.h5ad")
+print(adata)
+
+# Done!
+
+```
+
