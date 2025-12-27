@@ -637,45 +637,37 @@ data/
 
 ### Results - Figures (PDF)
 ```
-results/figures/
-├── 01_umap_batch_before_after.pdf      # Batch correction validation
-├── 02_umap_clusters.pdf                # Cluster assignments
-├── 03_feature_plots_markers.pdf        # Marker gene expression
-├── 04_trajectory_pseudotime_dpt.pdf    # Pseudotime visualization
-├── 05_gene_dynamics_trajectory.pdf     # GLI3/EOMES/NEUROD6 over time
-├── 06_volcano_progenitor_vs_neuron.pdf # Differential expression
-├── 07_volcano_dorsal_vs_ventral.pdf    # Regional comparison
-├── 08_heatmap_top_degs.pdf             # Marker genes as heatmap
-├── 09_gsea_progenitor.pdf              # Pathway enrichment
-└── 10_gsea_dorsal_ventral.pdf          # Regional pathways
+results/tables/
+├── deg_progenitors_vs_neurons.csv           # Progenitor vs Mature Neuron
+├── deg_dorsal_vs_ventral.csv                # Dorsal vs Ventral lineages
+├── deg_progenitor_vs_ip.csv                 # Progenitor vs Intermediate Progenitor
+├── deg_ip_vs_neuron.csv                     # Intermediate Progenitor vs Neuron
+├── deg_progenitor_vs_neuron_trajectory.csv  # Full trajectory comparison
+├── gsea_progenitor_pathways.csv             # Progenitor GO enrichment
+├── gsea_neuron_pathways.csv                 # Neuron GO enrichment
+├── gsea_dorsal_pathways.csv                 # Dorsal lineage pathways
+├── gsea_ventral_pathways.csv                # Ventral lineage pathways
+├── gsea_ip_specific_pathways.csv            # Intermediate Progenitor pathways
+└── pseudotime_results.csv                   # Pseudotime values and gene dynamics
 ```
 
 ### Results - Tables (CSV)
 ```
 results/tables/
-├── cluster_summary.csv                      # Cells per cluster, basic info
-├── cluster_markers_top10.csv                # Top 10 markers each cluster
-├── deg_progenitor_vs_neuron.csv             # Full diff expr results
-├── deg_dorsal_vs_ventral.csv                # Regional comparison
-├── deg_trajectory_stage_specific.csv        # Progenitor→IP→Neuron
-├── gsea_progenitor_pathways.csv             # GO enrichment
-├── gsea_neuron_pathways.csv
-├── gsea_dorsal_pathways.csv
-├── gsea_ventral_pathways.csv
-├── gsea_ip_specific_pathways.csv
-├── validation_transcriptome_similarity.csv  # Reference comparison
-├── validation_label_transfer_scores.csv     # Prediction confidence
-└── stage_gene_classification.csv            # Gene usage across stages
+├── deg_progenitors_vs_neurons.csv           # Progenitor vs Mature Neuron
+├── deg_dorsal_vs_ventral.csv                # Dorsal vs Ventral lineages
+├── deg_progenitor_vs_ip.csv                 # Progenitor vs Intermediate Progenitor
+├── deg_ip_vs_neuron.csv                     # Intermediate Progenitor vs Neuron
+├── deg_progenitor_vs_neuron_trajectory.csv  # Full trajectory comparison
+├── gsea_progenitor_pathways.csv             # Progenitor GO enrichment
+├── gsea_neuron_pathways.csv                 # Neuron GO enrichment
+├── gsea_dorsal_pathways.csv                 # Dorsal lineage pathways
+├── gsea_ventral_pathways.csv                # Ventral lineage pathways
+├── gsea_ip_specific_pathways.csv            # Intermediate Progenitor pathways
+└── pseudotime_results.csv                   # Pseudotime values and gene dynamics
 ```
 
-### Seurat Objects (RDS)
-```
-seurat_objects/
-├── ds1_processed.rds              # QC'd dataset 1
-├── ds2_processed.rds              # QC'd dataset 2
-├── integrated_harmony.rds         # Batch-corrected combined
-└── integrated_clean.rds           # Final annotated, all analyses
-```
+
 
 ### Python Export
 ```
