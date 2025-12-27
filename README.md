@@ -4,6 +4,8 @@ Comprehensive scRNA-seq analysis workflow for characterizing neural development 
 
 This tutorial is based on -  [Zhisong He's tutorial for scrna](https://github.com/quadbio/scRNAseq_analysis_vignette/blob/master/README.md)
 
+i have made some changes - especially using a intergrated dataset where i combine2 different datasets of human brain organoids
+
 
 ## Overview
 
