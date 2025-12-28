@@ -637,18 +637,125 @@ data/
 
 ### Results - Figures (PDF)
 ```
-results/tables/
-├── deg_progenitors_vs_neurons.csv           # Progenitor vs Mature Neuron
-├── deg_dorsal_vs_ventral.csv                # Dorsal vs Ventral lineages
-├── deg_progenitor_vs_ip.csv                 # Progenitor vs Intermediate Progenitor
-├── deg_ip_vs_neuron.csv                     # Intermediate Progenitor vs Neuron
-├── deg_progenitor_vs_neuron_trajectory.csv  # Full trajectory comparison
-├── gsea_progenitor_pathways.csv             # Progenitor GO enrichment
-├── gsea_neuron_pathways.csv                 # Neuron GO enrichment
-├── gsea_dorsal_pathways.csv                 # Dorsal lineage pathways
-├── gsea_ventral_pathways.csv                # Ventral lineage pathways
-├── gsea_ip_specific_pathways.csv            # Intermediate Progenitor pathways
-└── pseudotime_results.csv                   # Pseudotime values and gene dynamics
+All figures are saved in `plots_and_graphs/`
+
+### **Quality Control & Preprocessing**
+
+| File | Description |
+|------|-------------|
+| `ds1violinplot.png` | QC metrics for Dataset 1 (nFeature, nCount, %MT) |
+| `ds2violinplot.png` | QC metrics for Dataset 2 |
+| `ds1scatterplot.png` | Feature-count relationship DS1 |
+| `ds2scatterplot.png` | Feature-count relationship DS2 |
+| `ds1norm.png` | Normalized data DS1 |
+| `ds2norm.png` | Normalized data DS2 |
+
+### **Batch Correction & Integration**
+
+| File | Description |
+|------|-------------|
+| `afterbatcheffects.png` | UMAP after Harmony batch correction |
+| `afterbatcheffectswithclusters.png` | Post-integration with clusters labeled |
+| `nobatcheffects.png` | UMAP before batch correction (showing batch effect) |
+
+### **Dimensionality Reduction**
+
+| File | Description |
+|------|-------------|
+| `elbowplot.png` | PCA elbow plot (selecting PCs) |
+| `PCheatmap1.png` | Heatmap of top PCs (genes driving variation) |
+| `pcheatmap2.png` | Additional PC heatmap |
+
+### **Clustering & Cell Type Identification**
+
+| File | Description |
+|------|-------------|
+| `UMAPwithcluster.png` | UMAP with all 14 clusters labeled |
+| `umapaftercleaning.png` | UMAP after contamination removal |
+| `seuratcluster.png` | Seurat clustering results |
+| `seuratumap.png` | UMAP colored by Seurat clusters |
+| `tsnemap.png` | t-SNE visualization of clusters |
+| `tsnemoreclusters.png` | t-SNE with additional resolution |
+| `umapmoreclusters.png` | UMAP at higher clustering resolution |
+| `umapwithnames.png` | UMAP with cell type names |
+
+### **Marker Gene Expression**
+
+| File | Description |
+|------|-------------|
+| `umapmarkergenes.png` | Key marker genes on UMAP (SOX2, EOMES, NEUROD2, etc.) |
+| `tsnemarkergenes.png` | Marker genes on t-SNE |
+| `withmarkergenesaft.png` | Markers after cleaning |
+| `top10clustersheatmap.png` | Heatmap of top 10 markers per cluster |
+| `heatmap3.png` | Additional marker heatmap |
+
+### **Regional Identity (Dorsal vs Ventral)**
+
+| File | Description |
+|------|-------------|
+| `dorsal vs ventral.png` | UMAP colored by region (Dorsal/Ventral) |
+| `dvvumap.png` | Dorsal-ventral regional annotation |
+| `degdvv.png` | Differential genes dorsal vs ventral |
+| `deg2volcano.png` | Volcano plot: Dorsal vs Ventral DEGs |
+
+### **Maturation Stages**
+
+| File | Description |
+|------|-------------|
+| `maturationstage1uamp.png` | UMAP colored by maturation stage |
+| `ipneuronprogenotorumap.png` | Progenitor/IP/Neuron stages on UMAP |
+| `progenitor vs neuron vs cycling.png` | Three-way comparison |
+
+### **Developmental Trajectory (Pseudotime)**
+
+| File | Description |
+|------|-------------|
+| `psudotime.png` | Pseudotime values on UMAP |
+| `spesudotime1.png` | Pseudotime visualization (subset) |
+| `developmentalmarkeralongtrajectory.png` | Gene dynamics: GLI3, EOMES, NEUROD6 |
+| `cellcycleremove.png` | Cell cycle regression effect |
+
+### **Differential Gene Expression**
+
+| File | Description |
+|------|-------------|
+| `degvolcanopvn.png` | Volcano: Progenitors vs Neurons |
+| `topdegpvn.png` | Top DEGs: Progenitors vs Neurons |
+
+### **Validation & Reference Comparison**
+
+| File | Description |
+|------|-------------|
+| `celllevelslusters.png` | Cell-level validation clusters |
+| `cellleveltranscriptome.png` | Transcriptome similarity (cell-level) |
+| `umaptranscriptomelevel.png` | UMAP colored by reference correlation |
+
+### **Gene Set Enrichment Analysis (GSEA)**
+
+#### Progenitor Pathways
+| File | Description |
+|------|-------------|
+| `progenotorenriched pathway1.png` | Top progenitor-enriched GO terms |
+| `topprogenitorpathway.png` | Progenitor pathways (bar plot) |
+
+#### Neuron Pathways
+| File | Description |
+|------|-------------|
+| `neuronenrichedpathway.png` | Top neuron-enriched GO terms |
+| `topenuronpathways.png` | Neuron pathways (bar plot) |
+
+#### Regional Pathways
+| File | Description |
+|------|-------------|
+| `dorsalpathway.png` | Dorsal lineage GO enrichment |
+| `ventralpathway.png` | Ventral lineage GO enrichment |
+
+#### Stage-Specific Pathways
+| File | Description |
+|------|-------------|
+| `ipsecficipathways.png` | IP-specific pathways |
+| `GOacrosspathways.png` | GO terms across all comparisons |
+| `Geacrossstages.png` | Gene enrichment across maturation stages |
 ```
 
 ### Results - Tables (CSV)
